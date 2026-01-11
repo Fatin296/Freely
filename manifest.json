@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Freely - Screenshot Mockup Tool",
+  "name": "Freely - Screenshot & Mockup Tool",
   "version": "1.0.1",
-  "description": "Capture, edit, annotate, and share screenshots easily with Freely; lightweight, fast, and privacy-focused.",
+  "description": "Privacy-first screenshot tool with mockups, annotations, and blur. All processing happens locally on your device.",
   
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -31,7 +31,8 @@
     "downloads",
     "clipboardWrite",
     "storage",
-    "scripting"
+    "scripting",
+    "unlimitedStorage"
   ],
 
   "host_permissions": [],
