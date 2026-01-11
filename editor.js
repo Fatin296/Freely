@@ -1,6 +1,7 @@
 /**
  * Freely - Editor Main Logic
- * Final Version: Custom Area Fix, Mockup Fix, + Step & Pen Tools
+ * Version: Final Merged
+ * Features: Select/Move Fix, Step & Pen Tools, Custom Cropping, Mockups
  */
 
 class FreelyEditor {
@@ -8,6 +9,7 @@ class FreelyEditor {
     this.mainCanvas = document.getElementById('mainCanvas');
     this.overlayCanvas = document.getElementById('overlayCanvas');
     
+    // Optimization for frequent reading (blur/dragging)
     this.mainCtx = this.mainCanvas.getContext('2d', { willReadFrequently: true });
     this.overlayCtx = this.overlayCanvas.getContext('2d', { willReadFrequently: true });
     this.container = document.getElementById('canvasContainer');
@@ -23,17 +25,26 @@ class FreelyEditor {
     this.history = [[]]; 
     this.historyIndex = 0;
     
-    // Tool State
+    // Interaction State
     this.selectedAnnotation = null;
     this.isDrawing = false;
     this.isDragging = false;
-    this.stepCount = 1; // Counter for step tool
+    this.stepCount = 1; 
+    
+    // Dragging Coordinates
+    this.startX = 0;
+    this.startY = 0;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.initialItemState = null;
     
     this.currentColor = '#FF5F57';
     this.currentSize = 3;
     
+    // Mockup generator
     this.mockupGen = new MockupGenerator();
     
+    // Initialize
     this.init();
   }
 
@@ -46,6 +57,7 @@ class FreelyEditor {
       document.getElementById('loadingOverlay').style.display = 'none';
     } catch (error) {
       console.error('Initialization error:', error);
+      if(document.getElementById('toast')) this.showToast('Failed to load screenshot', 'error');
     }
   }
 
@@ -60,6 +72,7 @@ class FreelyEditor {
     return this.mockupGen.config[key] || { titleBarHeight: 0 };
   }
 
+  // LOGIC RESTORED: Custom Area Cropping
   async loadScreenshot() {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get(['tempScreenshot', 'captureMode', 'cropData'], (result) => {
@@ -68,16 +81,18 @@ class FreelyEditor {
         
         const img = new Image();
         img.onload = async () => {
+          // If custom mode, crop the image
           if (result.captureMode === 'custom' && result.cropData) {
             try {
               this.screenshot = await this.cropImage(img, result.cropData);
             } catch (e) {
-              console.error("Crop failed", e);
+              console.error("Crop failed, using full image", e);
               this.screenshot = img;
             }
           } else {
             this.screenshot = img;
           }
+          
           this.setupCanvas();
           this.render();
           chrome.storage.local.remove(['tempScreenshot', 'captureMode', 'cropData']);
@@ -149,6 +164,7 @@ class FreelyEditor {
     this.updateOverlay();
   }
 
+  // LOGIC RESTORED: Step and Pen tools
   drawAnnotation(annotation, ctx) {
     ctx.save();
     switch (annotation.type) {
@@ -162,8 +178,6 @@ class FreelyEditor {
     ctx.restore();
   }
 
-  // --- NEW TOOLS RENDERING ---
-  
   drawStep(ctx, step) {
     const { x, y, number, color, size } = step;
     const radius = 12 + (size * 1.5);
@@ -199,8 +213,6 @@ class FreelyEditor {
     ctx.lineWidth = size;
     ctx.stroke();
   }
-
-  // --- EXISTING TOOLS ---
 
   drawArrow(ctx, arrow) {
     const { x1, y1, x2, y2, color, thickness } = arrow;
@@ -292,7 +304,6 @@ class FreelyEditor {
         const r = 12 + (annotation.size * 1.5);
         return { x: annotation.x - r, y: annotation.y - r, width: r*2, height: r*2 };
       case 'pen':
-        // Calculate bounding box of all points
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         annotation.points.forEach(p => {
           minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
@@ -314,7 +325,7 @@ class FreelyEditor {
     }
   }
 
-  // --- EVENTS ---
+  // --- EVENTS & INTERACTION (FIXED: SELECT/MOVE LOGIC) ---
 
   setupEventListeners() {
     document.querySelectorAll('.tool-btn').forEach(btn => {
@@ -328,7 +339,6 @@ class FreelyEditor {
       });
     });
     
-    // UI Control listeners... (Mockup, Color, Size, etc.)
     document.getElementById('mockupToggle').addEventListener('change', (e) => { this.mockupEnabled = e.target.checked; this.setupCanvas(); this.render(); });
     document.getElementById('mockupType').addEventListener('change', (e) => { this.mockupType = e.target.value; if(this.mockupEnabled){this.setupCanvas(); this.render();} });
     document.getElementById('mockupTheme').addEventListener('change', (e) => { this.mockupTheme = e.target.value; if(this.mockupEnabled) this.render(); });
@@ -367,6 +377,7 @@ class FreelyEditor {
     this.startY = pos.y;
     this.isDrawing = true;
     
+    // FIX: Enhanced Selection Logic
     if (this.currentTool === 'select') {
       const item = this.getAnnotationAt(this.startX, this.startY);
       if (item) {
@@ -381,14 +392,12 @@ class FreelyEditor {
         this.render();
       }
     } else if (this.currentTool === 'step') {
-      // Step tool places immediately on click
       this.addAnnotation({
         type: 'step', x: this.startX, y: this.startY,
         number: this.stepCount++, color: this.currentColor, size: this.currentSize
       });
-      this.isDrawing = false; // Single click action
+      this.isDrawing = false; 
     } else if (this.currentTool === 'pen') {
-      // Initialize new pen path
       this.currentPenPath = {
         type: 'pen', points: [{x: this.startX, y: this.startY}],
         color: this.currentColor, size: this.currentSize
@@ -413,7 +422,7 @@ class FreelyEditor {
     const currentX = pos.x;
     const currentY = pos.y;
     
-    // Dragging
+    // FIX: Dragging Logic
     if (this.currentTool === 'select' && this.isDragging && this.selectedAnnotation) {
       const dx = currentX - this.dragStartX;
       const dy = currentY - this.dragStartY;
@@ -423,12 +432,10 @@ class FreelyEditor {
       if (item.type === 'arrow') {
         item.x1 = initial.x1 + dx; item.y1 = initial.y1 + dy;
         item.x2 = initial.x2 + dx; item.y2 = initial.y2 + dy;
-      } else if (item.type === 'step') {
-        item.x = initial.x + dx; item.y = initial.y + dy;
       } else if (item.type === 'pen') {
-        // Move all points
         item.points = initial.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
       } else {
+        // Box, Blur, Step, Text
         item.x = initial.x + dx; item.y = initial.y + dy;
       }
       this.render();
@@ -438,14 +445,12 @@ class FreelyEditor {
     // Pen Drawing
     if (this.currentTool === 'pen') {
       this.currentPenPath.points.push({x: currentX, y: currentY});
-      // Render immediately for pen to feel responsive
       this.render();
-      // Draw current path on top to ensure visibility during draw
       this.drawPen(this.mainCtx, this.currentPenPath);
       return;
     }
     
-    // Shape Previews (Overlay)
+    // Shape Previews
     this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
     if (this.currentTool === 'arrow') {
       this.drawArrow(this.overlayCtx, { x1: this.startX, y1: this.startY, x2: currentX, y2: currentY, color: this.currentColor, thickness: this.currentSize });
@@ -461,6 +466,7 @@ class FreelyEditor {
     if (!this.isDrawing) return;
     this.isDrawing = false;
     
+    // FIX: Stop dragging and save
     if (this.isDragging) {
       this.isDragging = false;
       this.saveToHistory();
@@ -496,8 +502,21 @@ class FreelyEditor {
     this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
   }
 
-  // --- STANDARD HELPERS (Add, Delete, History, Export, Keyboard) ---
-  
+  getAnnotationAt(x, y) {
+    // FIX: Added tolerance (padding) for easier selection
+    const padding = 15; 
+    for (let i = this.annotations.length - 1; i >= 0; i--) {
+      const annotation = this.annotations[i];
+      const bounds = this.getAnnotationBounds(annotation);
+      if (x >= bounds.x - padding && x <= bounds.x + bounds.width + padding &&
+          y >= bounds.y - padding && y <= bounds.y + bounds.height + padding) {
+        return annotation;
+      }
+    }
+    return null;
+  }
+
+  // --- DATA MANAGEMENT ---
   addAnnotation(annotation) { this.annotations.push(annotation); this.saveToHistory(); this.render(); }
   
   deleteAnnotation(annotation) {
