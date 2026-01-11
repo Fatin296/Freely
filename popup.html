@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Freely - Screenshot Tool</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="header">
+      <h1 class="title">📸 Freely</h1>
+      <p class="subtitle">Privacy-first screenshot tool</p>
+    </div>
+
+    <!-- Screenshot Options -->
+    <div class="capture-modes">
+      <button id="captureVisible" class="capture-btn" title="Capture visible area of current tab">
+        <span class="icon">🖥️</span>
+        <span class="label">Visible Tab</span>
+      </button>
+
+      <button id="captureFullPage" class="capture-btn" title="Capture entire scrollable page">
+        <span class="icon">📄</span>
+        <span class="label">Full Page</span>
+      </button>
+
+      <button id="captureCustom" class="capture-btn" title="Select custom area to capture">
+        <span class="icon">✂️</span>
+        <span class="label">Custom Area</span>
+      </button>
+    </div>
+
+    <!-- Status Message -->
+    <div id="statusMessage" class="status-message hidden"></div>
+
+    <!-- Privacy Notice -->
+    <div class="privacy-notice">
+      <small>🔒 All processing happens locally. No data leaves your device.</small>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

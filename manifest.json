@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Freely - Screenshot Mockup Tool",
+  "version": "1.0.1",
+  "description": "Capture, edit, annotate, and share screenshots easily with Freely; lightweight, fast, and privacy-focused.",
+  
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    },
+    "default_title": "Freely - Take Screenshot"
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "clipboardWrite",
+    "storage",
+    "scripting"
+  ],
+
+  "host_permissions": [],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+
+  "minimum_chrome_version": "88"
+}

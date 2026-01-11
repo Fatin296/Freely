@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Freely Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <div class="logo">
+        <span class="logo-icon">📸</span>
+        <span class="logo-text">Freely Editor</span>
+      </div>
+    </div>
+
+    <div class="toolbar-center">
+      <div class="tool-group">
+        <button id="selectTool" class="tool-btn active" title="Select/Move (V)" data-tool="select">
+          <span>↖️</span>
+        </button>
+        <button id="stepTool" class="tool-btn" title="Step Counter (S)" data-tool="step">
+          <span>➊</span>
+        </button>
+        <button id="arrowTool" class="tool-btn" title="Arrow (A)" data-tool="arrow">
+          <span>➡️</span>
+        </button>
+        <button id="penTool" class="tool-btn" title="Freehand Pen (P)" data-tool="pen">
+          <span>✏️</span>
+        </button>
+        <button id="boxTool" class="tool-btn" title="Box/Border (B)" data-tool="box">
+          <span>⬜</span>
+        </button>
+        <button id="textTool" class="tool-btn" title="Text (T)" data-tool="text">
+          <span>T</span>
+        </button>
+        <button id="blurTool" class="tool-btn" title="Blur (U)" data-tool="blur">
+          <span>🌫️</span>
+        </button>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="mockup-group">
+        <label class="toggle-label">
+          <input type="checkbox" id="mockupToggle">
+          <span>Mockup</span>
+        </label>
+        <select id="mockupType" class="select-input">
+          <option value="macos">macOS</option>
+          <option value="windows">Windows</option>
+        </select>
+        <select id="mockupTheme" class="select-input">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+
+      <div class="separator"></div>
+
+      <div class="style-group">
+        <input type="color" id="colorPicker" value="#FF5F57" title="Color">
+        <input type="range" id="sizeSlider" min="1" max="20" value="3" title="Size/Thickness">
+        <span id="sizeValue" class="size-value">3</span>
+      </div>
+    </div>
+
+    <div class="toolbar-right">
+      <button id="undoBtn" class="action-btn" title="Undo (Ctrl+Z)" disabled>
+        <span>↶</span>
+      </button>
+      <button id="redoBtn" class="action-btn" title="Redo (Ctrl+Y)" disabled>
+        <span>↷</span>
+      </button>
+
+      <div class="separator"></div>
+
+      <button id="copyBtn" class="action-btn primary" title="Copy to Clipboard">
+        <span>📋</span> Copy
+      </button>
+      <button id="downloadBtn" class="action-btn primary" title="Download">
+        <span>💾</span> Download
+      </button>
+    </div>
+  </div>
+
+  <div class="canvas-container" id="canvasContainer">
+    <canvas id="mainCanvas"></canvas>
+    <canvas id="overlayCanvas"></canvas>
+  </div>
+
+  <div class="property-panel" id="propertyPanel" style="display: none;">
+    <h3>Properties</h3>
+    <div id="propertyContent"></div>
+    <button id="deleteSelected" class="delete-btn">🗑️ Delete</button>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <p>Loading screenshot...</p>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="mockup-generator.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
