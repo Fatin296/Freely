@@ -2,7 +2,7 @@
  * Freely - Popup Logic
  * Handles screenshot capture in three modes:
  * 1. Visible Tab - Current viewport
- * 2. Full Page - Entire scrollable page (Fixed Logic)
+ * 2. Full Page - Entire scrollable page (Verified Logic)
  * 3. Custom Area - User-selected region
  * Privacy: All captures are user-triggered and processed locally
  */
@@ -73,7 +73,7 @@ async function captureVisible() {
 }
 
 /**
- * 2. FULL PAGE CAPTURE (Fixed Scroll & Stitch)
+ * 2. FULL PAGE CAPTURE (Robust Scroll & Stitch)
  */
 async function captureFullPage() {
   try {
@@ -94,28 +94,39 @@ async function captureFullPage() {
       })
     });
 
+    if (!dimResult || !dimResult.result) throw new Error('Failed to get page dimensions');
+
     const { width, height, windowHeight, devicePixelRatio } = dimResult.result;
     
     // 2. Scroll and Capture Loop
     const captures = [];
     let currentScroll = 0;
-
+    
     while (currentScroll < height) {
-      // Scroll to position
+      let y = currentScroll;
+      
+      // Handle bottom edge case
+      if (currentScroll + windowHeight > height) {
+        y = height - windowHeight;
+        if (y < 0) y = 0;
+        currentScroll = height; // End loop after this
+      } else {
+        currentScroll += windowHeight;
+      }
+
+      // Scroll
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (y) => window.scrollTo(0, y),
-        args: [currentScroll]
+        func: (scrollToY) => window.scrollTo(0, scrollToY),
+        args: [y]
       });
 
-      // Wait for scroll to settle (Important for stability)
+      // Wait for scroll to settle
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Capture visible part
+      // Capture
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-      captures.push({ y: currentScroll, dataUrl });
-
-      currentScroll += windowHeight;
+      captures.push({ y: y, dataUrl });
     }
 
     // 3. Reset Scroll
@@ -181,7 +192,7 @@ async function captureCustom() {
       func: initCustomSelection
     });
     
-    // Close popup - selection happens on page
+    // Close popup
     window.close();
     
   } catch (error) {
@@ -192,6 +203,8 @@ async function captureCustom() {
 }
 
 function initCustomSelection() {
+  if (document.getElementById('freely-selection-overlay')) return;
+
   const overlay = document.createElement('div');
   overlay.id = 'freely-selection-overlay';
   overlay.style.cssText = `
@@ -246,10 +259,9 @@ function initCustomSelection() {
     overlay.remove();
     selection.remove();
     
-    // Small delay to ensure clean UI removal before capture
     setTimeout(() => {
       chrome.runtime.sendMessage({
-        action: 'areaSelected', // Matches background.js listener
+        action: 'areaSelected',
         area: {
           x: rect.left,
           y: rect.top,
