@@ -2,7 +2,7 @@
  * Freely - Popup Logic
  * Handles screenshot capture in three modes:
  * 1. Visible Tab - Current viewport
- * 2. Full Page - Entire scrollable page (Verified Logic)
+ * 2. Full Page - Entire scrollable page (Robust Scroll & Stitch)
  * 3. Custom Area - User-selected region
  * Privacy: All captures are user-triggered and processed locally
  */
@@ -20,6 +20,7 @@ function showStatus(message, type = 'success') {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${type}`;
   
+  // Hide non-loading messages after 3 seconds
   if (type !== 'loading') {
     setTimeout(() => {
       statusMessage.classList.add('hidden');
@@ -28,7 +29,7 @@ function showStatus(message, type = 'success') {
 }
 
 /**
- * Disable buttons during processing
+ * Disable buttons during processing to prevent double-clicks
  */
 function disableButtons() {
   [captureVisibleBtn, captureFullPageBtn, captureCustomBtn].forEach(btn => {
@@ -55,25 +56,37 @@ async function captureVisible() {
     disableButtons();
     showStatus('Capturing visible area...', 'loading');
     
+    // Get active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) throw new Error('No active tab found');
     
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    if (!tab) {
+      throw new Error('No active tab found');
+    }
     
+    // Capture visible tab as high-quality PNG
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+      format: 'png',
+      quality: 100
+    });
+    
+    // Send to editor
     await openEditor(dataUrl, 'visible');
     
     showStatus('✓ Opening editor...', 'success');
+    
+    // Close popup after brief delay
     setTimeout(() => window.close(), 500);
     
   } catch (error) {
     console.error('Capture visible error:', error);
-    showStatus('❌ Failed to capture.', 'error');
+    showStatus('❌ Failed to capture. Please try again.', 'error');
     enableButtons();
   }
 }
 
 /**
- * 2. FULL PAGE CAPTURE (Robust Scroll & Stitch)
+ * 2. FULL PAGE CAPTURE
+ * Logic: Scroll page in chunks -> Capture visible part -> Stitch together
  */
 async function captureFullPage() {
   try {
@@ -83,7 +96,7 @@ async function captureFullPage() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) throw new Error('No active tab found');
 
-    // 1. Get Page Dimensions
+    // 1. Get Page Dimensions via Script Injection
     const [dimResult] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => ({
@@ -105,31 +118,34 @@ async function captureFullPage() {
     while (currentScroll < height) {
       let y = currentScroll;
       
-      // Handle bottom edge case
+      // Handle the bottom edge case:
+      // If the next scroll goes past the bottom, snap to the exact bottom.
       if (currentScroll + windowHeight > height) {
         y = height - windowHeight;
-        if (y < 0) y = 0;
-        currentScroll = height; // End loop after this
+        if (y < 0) y = 0; // Safety for extremely short pages
+        currentScroll = height; // Mark as done after this capture
       } else {
         currentScroll += windowHeight;
       }
 
-      // Scroll
+      // Execute Scroll
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (scrollToY) => window.scrollTo(0, scrollToY),
         args: [y]
       });
 
-      // Wait for scroll to settle
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait 1000ms for:
+      // 1. Page to render/stabilize after scroll
+      // 2. Avoiding Chrome's "MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND" error
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Capture
+      // Capture this slice
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
       captures.push({ y: y, dataUrl });
     }
 
-    // 3. Reset Scroll
+    // 3. Reset Scroll to Top
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => window.scrollTo(0, 0)
@@ -137,7 +153,7 @@ async function captureFullPage() {
 
     showStatus('Processing image...', 'loading');
 
-    // 4. Stitch Images
+    // 4. Stitch Images Together
     const finalUrl = await stitchImages(captures, width, height, devicePixelRatio);
     
     // 5. Open Editor
@@ -153,6 +169,9 @@ async function captureFullPage() {
   }
 }
 
+/**
+ * Helper: Stitch multiple captured slices into one long image
+ */
 function stitchImages(captures, totalWidth, totalHeight, ratio) {
   return new Promise((resolve) => {
     const canvas = document.createElement('canvas');
@@ -164,6 +183,7 @@ function stitchImages(captures, totalWidth, totalHeight, ratio) {
     captures.forEach(cap => {
       const img = new Image();
       img.onload = () => {
+        // Draw slice at correct Y position (scaled by pixel ratio)
         ctx.drawImage(img, 0, cap.y * ratio);
         loadedCount++;
         if (loadedCount === captures.length) {
@@ -186,13 +206,13 @@ async function captureCustom() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab) throw new Error('No active tab found');
     
-    // Inject overlay
+    // Inject overlay script into page
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: initCustomSelection
     });
     
-    // Close popup
+    // Close popup so user can interact with the page overlay
     window.close();
     
   } catch (error) {
@@ -202,7 +222,12 @@ async function captureCustom() {
   }
 }
 
+/**
+ * Content Script: Initialize custom area selection overlay
+ * This runs inside the web page context
+ */
 function initCustomSelection() {
+  // Prevent multiple injections
   if (document.getElementById('freely-selection-overlay')) return;
 
   const overlay = document.createElement('div');
@@ -256,9 +281,11 @@ function initCustomSelection() {
     isDrawing = false;
     const rect = selection.getBoundingClientRect();
     
+    // Clean up UI immediately
     overlay.remove();
     selection.remove();
     
+    // Slight delay to ensure UI is fully removed before background captures
     setTimeout(() => {
       chrome.runtime.sendMessage({
         action: 'areaSelected',
@@ -284,7 +311,7 @@ function initCustomSelection() {
 }
 
 /**
- * Open editor helper
+ * Helper to send open request to background script
  */
 async function openEditor(dataUrl, mode) {
   return new Promise((resolve, reject) => {
@@ -302,7 +329,7 @@ async function openEditor(dataUrl, mode) {
   });
 }
 
-// Event listeners
+// Attach Event Listeners
 captureVisibleBtn.addEventListener('click', captureVisible);
 captureFullPageBtn.addEventListener('click', captureFullPage);
 captureCustomBtn.addEventListener('click', captureCustom);
