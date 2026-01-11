@@ -1,89 +1,144 @@
 /**
  * Freely - Popup Logic
- * Handles capture modes: Visible, Full Page, Custom
+ * Handles screenshot capture in three modes:
+ * 1. Visible Tab - Current viewport
+ * 2. Full Page - Entire scrollable page (Fixed Logic)
+ * 3. Custom Area - User-selected region
+ * Privacy: All captures are user-triggered and processed locally
  */
 
+// DOM elements
 const captureVisibleBtn = document.getElementById('captureVisible');
 const captureFullPageBtn = document.getElementById('captureFullPage');
 const captureCustomBtn = document.getElementById('captureCustom');
 const statusMessage = document.getElementById('statusMessage');
 
+/**
+ * Show status message to user
+ */
 function showStatus(message, type = 'success') {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${type}`;
-  statusMessage.classList.remove('hidden');
-}
-
-async function getCurrentTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab;
-}
-
-// --- 1. VISIBLE TAB CAPTURE ---
-async function captureVisible() {
-  try {
-    showStatus('Capturing...', 'loading');
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-    await openEditor(dataUrl, 'visible');
-    window.close();
-  } catch (error) {
-    console.error(error);
-    showStatus('Failed to capture visible tab.', 'error');
+  
+  if (type !== 'loading') {
+    setTimeout(() => {
+      statusMessage.classList.add('hidden');
+    }, 3000);
   }
 }
 
-// --- 2. FULL PAGE CAPTURE ---
-async function captureFullPage() {
-  const tab = await getCurrentTab();
-  if (!tab) return showStatus('No active tab.', 'error');
+/**
+ * Disable buttons during processing
+ */
+function disableButtons() {
+  [captureVisibleBtn, captureFullPageBtn, captureCustomBtn].forEach(btn => {
+    btn.classList.add('loading');
+    btn.disabled = true;
+  });
+}
 
-  showStatus('Scrolling & capturing...', 'loading');
+/**
+ * Enable buttons
+ */
+function enableButtons() {
+  [captureVisibleBtn, captureFullPageBtn, captureCustomBtn].forEach(btn => {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  });
+}
 
+/**
+ * 1. VISIBLE TAB CAPTURE
+ */
+async function captureVisible() {
   try {
-    await chrome.scripting.executeScript({
+    disableButtons();
+    showStatus('Capturing visible area...', 'loading');
+    
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab found');
+    
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    
+    await openEditor(dataUrl, 'visible');
+    
+    showStatus('✓ Opening editor...', 'success');
+    setTimeout(() => window.close(), 500);
+    
+  } catch (error) {
+    console.error('Capture visible error:', error);
+    showStatus('❌ Failed to capture.', 'error');
+    enableButtons();
+  }
+}
+
+/**
+ * 2. FULL PAGE CAPTURE (Fixed Scroll & Stitch)
+ */
+async function captureFullPage() {
+  try {
+    disableButtons();
+    showStatus('Capturing full page...', 'loading');
+    
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab found');
+
+    // 1. Get Page Dimensions
+    const [dimResult] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => {
-        window.scrollTo(0, 0);
-        return {
-          width: document.documentElement.scrollWidth,
-          height: document.documentElement.scrollHeight,
-          windowHeight: window.innerHeight,
-          devicePixelRatio: window.devicePixelRatio
-        };
-      }
-    }).then(async (results) => {
-      const { width, height, windowHeight, devicePixelRatio } = results[0].result;
-      const captures = [];
-      let currentScroll = 0;
+      func: () => ({
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight,
+        windowHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio
+      })
+    });
 
-      while (currentScroll < height) {
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-        captures.push({ y: currentScroll, img: dataUrl });
+    const { width, height, windowHeight, devicePixelRatio } = dimResult.result;
+    
+    // 2. Scroll and Capture Loop
+    const captures = [];
+    let currentScroll = 0;
 
-        currentScroll += windowHeight;
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (y) => window.scrollTo(0, y),
-          args: [currentScroll]
-        });
-
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      showStatus('Processing image...', 'loading');
-      const finalUrl = await stitchImages(captures, width, height, devicePixelRatio);
-      
-      chrome.scripting.executeScript({
+    while (currentScroll < height) {
+      // Scroll to position
+      await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => window.scrollTo(0, 0)
+        func: (y) => window.scrollTo(0, y),
+        args: [currentScroll]
       });
 
-      await openEditor(finalUrl, 'fullpage');
-      window.close();
+      // Wait for scroll to settle (Important for stability)
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Capture visible part
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      captures.push({ y: currentScroll, dataUrl });
+
+      currentScroll += windowHeight;
+    }
+
+    // 3. Reset Scroll
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.scrollTo(0, 0)
     });
-  } catch (err) {
-    console.error(err);
-    showStatus('Full page capture failed.', 'error');
+
+    showStatus('Processing image...', 'loading');
+
+    // 4. Stitch Images
+    const finalUrl = await stitchImages(captures, width, height, devicePixelRatio);
+    
+    // 5. Open Editor
+    await openEditor(finalUrl, 'fullpage');
+    
+    showStatus('✓ Opening editor...', 'success');
+    setTimeout(() => window.close(), 500);
+    
+  } catch (error) {
+    console.error('Capture full page error:', error);
+    showStatus('❌ Failed to capture full page.', 'error');
+    enableButtons();
   }
 }
 
@@ -104,61 +159,71 @@ function stitchImages(captures, totalWidth, totalHeight, ratio) {
           resolve(canvas.toDataURL('image/png'));
         }
       };
-      img.src = cap.img;
+      img.src = cap.dataUrl;
     });
   });
 }
 
-// --- 3. CUSTOM AREA CAPTURE ---
+/**
+ * 3. CUSTOM AREA CAPTURE
+ */
 async function captureCustom() {
-  const tab = await getCurrentTab();
-  if (!tab) return;
-
   try {
-    showStatus('Select area on page...', 'loading');
+    disableButtons();
+    showStatus('Select area to capture...', 'loading');
     
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab found');
+    
+    // Inject overlay
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: injectSelectionOverlay
+      func: initCustomSelection
     });
-
-    // We close the popup shortly after injection so it doesn't block the view
-    // The background script listens for the 'areaSelected' message
-    setTimeout(() => window.close(), 500);
-
-  } catch (err) {
-    console.error(err);
-    showStatus('Custom capture failed.', 'error');
+    
+    // Close popup - selection happens on page
+    window.close();
+    
+  } catch (error) {
+    console.error('Capture custom error:', error);
+    showStatus('❌ Failed to start custom capture.', 'error');
+    enableButtons();
   }
 }
 
-function injectSelectionOverlay() {
-  if (document.getElementById('freely-overlay')) return;
-
+function initCustomSelection() {
   const overlay = document.createElement('div');
-  overlay.id = 'freely-overlay';
-  overlay.style.cssText = `position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;cursor:crosshair;background:rgba(0,0,0,0.3);`;
+  overlay.id = 'freely-selection-overlay';
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.5); z-index: 2147483647; cursor: crosshair;
+  `;
   
-  const box = document.createElement('div');
-  box.style.cssText = `position:absolute;border:2px dashed #FFF;box-shadow:0 0 0 9999px rgba(0,0,0,0.5);display:none;pointer-events:none;`;
-  overlay.appendChild(box);
+  const selection = document.createElement('div');
+  selection.id = 'freely-selection-box';
+  selection.style.cssText = `
+    position: fixed; border: 2px dashed #667eea; background: rgba(102, 126, 234, 0.1);
+    display: none; z-index: 2147483648; pointer-events: none;
+  `;
+  
   document.body.appendChild(overlay);
-
-  let startX, startY, isDown = false;
-
-  const onMouseDown = (e) => {
-    isDown = true;
+  document.body.appendChild(selection);
+  
+  let startX, startY, isDrawing = false;
+  
+  overlay.addEventListener('mousedown', (e) => {
+    isDrawing = true;
     startX = e.clientX;
     startY = e.clientY;
-    box.style.display = 'block';
-    box.style.left = startX + 'px';
-    box.style.top = startY + 'px';
-    box.style.width = '0px';
-    box.style.height = '0px';
-  };
-
-  const onMouseMove = (e) => {
-    if (!isDown) return;
+    selection.style.display = 'block';
+    selection.style.left = startX + 'px';
+    selection.style.top = startY + 'px';
+    selection.style.width = '0px';
+    selection.style.height = '0px';
+  });
+  
+  overlay.addEventListener('mousemove', (e) => {
+    if (!isDrawing) return;
     const currentX = e.clientX;
     const currentY = e.clientY;
     
@@ -166,51 +231,68 @@ function injectSelectionOverlay() {
     const height = Math.abs(currentY - startY);
     const left = Math.min(currentX, startX);
     const top = Math.min(currentY, startY);
-
-    box.style.width = width + 'px';
-    box.style.height = height + 'px';
-    box.style.left = left + 'px';
-    box.style.top = top + 'px';
-  };
-
-  const onMouseUp = (e) => {
-    if (!isDown) return;
-    isDown = false;
     
-    const rect = box.getBoundingClientRect();
+    selection.style.left = left + 'px';
+    selection.style.top = top + 'px';
+    selection.style.width = width + 'px';
+    selection.style.height = height + 'px';
+  });
+  
+  overlay.addEventListener('mouseup', async (e) => {
+    if (!isDrawing) return;
+    isDrawing = false;
+    const rect = selection.getBoundingClientRect();
     
-    // 1. REMOVE OVERLAY IMMEDIATELY
-    document.body.removeChild(overlay);
+    overlay.remove();
+    selection.remove();
     
-    // 2. WAIT FOR REPAINT (Fixes white border issue)
-    // We give the browser a moment to render the page cleanly before sending the message
-    if (rect.width > 5 && rect.height > 5) {
-      setTimeout(() => {
-        chrome.runtime.sendMessage({
-          action: 'areaSelected',
-          area: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-          devicePixelRatio: window.devicePixelRatio
-        });
-      }, 100); 
+    // Small delay to ensure clean UI removal before capture
+    setTimeout(() => {
+      chrome.runtime.sendMessage({
+        action: 'areaSelected', // Matches background.js listener
+        area: {
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height
+        },
+        devicePixelRatio: window.devicePixelRatio
+      });
+    }, 100);
+  });
+  
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      selection.remove();
     }
-  };
-
-  overlay.addEventListener('mousedown', onMouseDown);
-  overlay.addEventListener('mousemove', onMouseMove);
-  overlay.addEventListener('mouseup', onMouseUp);
+  });
+  
+  overlay.focus();
 }
 
-function openEditor(dataUrl, mode) {
-  return new Promise((resolve) => {
+/**
+ * Open editor helper
+ */
+async function openEditor(dataUrl, mode) {
+  return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({
       action: 'openEditor',
       screenshotData: dataUrl,
       captureMode: mode
-    }, resolve);
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve(response);
+      }
+    });
   });
 }
 
-// Listeners
+// Event listeners
 captureVisibleBtn.addEventListener('click', captureVisible);
 captureFullPageBtn.addEventListener('click', captureFullPage);
 captureCustomBtn.addEventListener('click', captureCustom);
+
+console.log('Freely popup loaded');
